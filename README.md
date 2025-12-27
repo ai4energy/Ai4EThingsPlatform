@@ -19,7 +19,7 @@
 
 ## v2.0.0
 
-![图 3](v2.0\assets\figs\README-19-59-34.png)  
+![图 3](v2.0/assets/figs/README-19-59-34.png)  
 
 其中：
 
