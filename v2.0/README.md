@@ -82,8 +82,12 @@ PLC控制风扇通断与风速大小，通过树莓派网关上传至上位机�
 树莓派中以根据[Neuron文档](https://docs.emqx.com/zh/neuronex/latest/installation/ubuntu.html)安装了deb版，并配置了开机自启动，运行Neuron。根据[emqx文档](https://www.emqx.com/zh/downloads-and-install/enterprise?os=Debian)安装EMQX了MQTT服务器。
 
 树莓派IP：192.168.3.188
-Neuron控制台地址：http://192.168.3.188:8085，账号密码为：admin/0000
-emqx控制台地址：http://192.168.3.188:18083，账号密码为：admin/ai4energy
+
+Neuron控制台地址：http://192.168.3.188:8085。
+账号密码为：admin/0000
+
+emqx控制台地址：http://192.168.3.188:18083。
+账号密码为：admin/ai4energy
 
 ### Neuron配置
 
