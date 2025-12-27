@@ -1,0 +1,760 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ai4Energy-PLC风扇物联网系统</title>
+    <!-- 引入外部资源 -->
+    <script src="assets\tailwind.min.js"></script>
+    <link href="assets\font-awesome-4.7.0\css\font-awesome.min.css" rel="stylesheet">
+    <script src="assets\chart.umd.min.js"></script>
+    <!-- Paho MQTT Client -->
+    <script src="assets\mqttws31.js"></script>
+
+    <!-- Tailwind 配置 -->
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#0ea5e9', // 主色调：科技蓝
+                        secondary: '#06b6d4', // 辅助色：青色
+                        dark: '#0f172a', // 深色背景
+                        darker: '#020617', // 更深背景
+                        neon: '#22d3ee', // 霓虹色
+                        success: '#10b981', // 成功色
+                        warning: '#f59e0b', // 警告色
+                        danger: '#ef4444', // 危险色
+                    },
+                    fontFamily: {
+                        cyber: ['"Rajdhani"', 'sans-serif'],
+                    },
+                    boxShadow: {
+                        'neon': '0 0 5px #22d3ee, 0 0 20px rgba(34, 211, 238, 0.3)',
+                        'neon-lg': '0 0 10px #22d3ee, 0 0 30px rgba(34, 211, 238, 0.4)',
+                    }
+                },
+            }
+        }
+    </script>
+
+    <!-- 自定义工具类 -->
+    <style type="text/tailwindcss">
+        @layer utilities {
+            .content-auto {
+                content-visibility: auto;
+            }
+            .text-shadow-neon {
+                text-shadow: 0 0 5px #22d3ee, 0 0 10px rgba(34, 211, 238, 0.7);
+            }
+            .border-glow {
+                box-shadow: 0 0 5px #22d3ee, inset 0 0 5px rgba(34, 211, 238, 0.5);
+            }
+            .bg-grid {
+                background-image: 
+                    linear-gradient(rgba(14, 165, 233, 0.1) 1px, transparent 1px),
+                    linear-gradient(90deg, rgba(14, 165, 233, 0.1) 1px, transparent 1px);
+                background-size: 20px 20px;
+            }
+            .pulse-animation {
+                animation: pulse 2s infinite;
+            }
+            @keyframes pulse {
+                0%, 100% { opacity: 1; }
+                50% { opacity: 0.7; }
+            }
+            .slide-in {
+                animation: slideIn 0.5s ease-out forwards;
+            }
+            @keyframes slideIn {
+                from { transform: translateY(20px); opacity: 0; }
+                to { transform: translateY(0); opacity: 1; }
+            }
+        }
+    </style>
+
+    <!-- 导入字体 -->
+    <link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@400;500;600;700&display=swap" rel="stylesheet">
+</head>
+
+<body class="bg-darker text-gray-200 font-cyber min-h-screen bg-grid overflow-x-hidden">
+    <!-- 顶部导航栏 -->
+    <header class="bg-dark/80 backdrop-blur-md border-b border-primary/30 sticky top-0 z-50">
+        <div class="container mx-auto px-4 py-3 flex justify-between items-center">
+            <div class="flex items-center gap-3">
+                <i class="fa fa-microchip text-neon text-2xl text-shadow-neon"></i>
+                <h1 class="text-[clamp(1.2rem,3vw,1.8rem)] font-bold text-white">
+                    Ai4Energy<span class="text-neon">PLC风扇物联网</span>系统
+                </h1>
+                <img src="assets/logo.png" alt="Logo" class="h-8 object-contain">
+            </div>
+            <div class="flex items-center gap-4">
+                <div class="hidden md:flex items-center gap-2 text-sm text-gray-400">
+                    <i class="fa fa-clock-o text-primary"></i>
+                    <span id="current-time">2025-11-08 12:00:00</span>
+                </div>
+                <div class="flex items-center gap-2 text-sm text-gray-400">
+                    <i class="fa fa-signal text-primary"></i>
+                    <span id="connection-status" class="text-danger">
+                        <i class="fa fa-circle text-xs"></i> 离线
+                    </span>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <!-- 主内容区 -->
+    <main class="container mx-auto px-4 py-6">
+        <!-- 风扇控制区 -->
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
+            <!-- 风扇状态显示 -->
+            <div class="lg:col-span-1 bg-dark/60 backdrop-blur-sm rounded-xl p-6 border border-primary/30 border-glow slide-in"
+                style="animation-delay: 0.4s">
+                <div class="flex justify-between items-center mb-6">
+                    <h2 class="text-xl font-bold text-white flex items-center gap-2">
+                        <i class="fa fa-fan text-neon text-shadow-neon"></i>
+                        风扇状态
+                    </h2>
+                    <span id="fan-status"
+                        class="px-3 py-1 rounded-full text-xs font-medium bg-danger/20 text-danger border border-danger/30">
+                        已停止
+                    </span>
+                </div>
+
+                <div class="flex flex-col items-center justify-center py-6">
+                    <div class="relative w-48 h-48 mb-6">
+                        <!-- 风扇图标 -->
+                        <div id="fan-icon" class="absolute inset-0 flex items-center justify-center">
+                            <i
+                                class="fa fa-fan text-6xl text-neon text-shadow-neon transform transition-transform duration-1000 ease-in-out"></i>
+                        </div>
+                        <!-- 速度环形进度条 -->
+                        <canvas id="fanSpeedChart"></canvas>
+                    </div>
+
+                    <div class="text-center">
+                        <h3 class="text-gray-400 text-lg">当前档位</h3>
+                        <p class="text-5xl font-bold text-white mt-2" id="fan-speed">1<span
+                                class="text-2xl text-neon ml-1">档</span></p>
+                        <p class="text-sm text-gray-400 mt-1">设定值: <span id="fan-setting">1档</span></p>
+                    </div>
+
+                    <!-- 新增：计数器显示 -->
+                    <div class="text-center mt-4 pt-4 border-t border-gray-700">
+                        <h3 class="text-gray-400 text-lg">运行计数</h3>
+                        <p class="text-3xl font-bold text-white mt-2" id="fan-counter">0<span
+                                class="text-xl text-neon ml-1"></span></p>
+                        <p class="text-sm text-gray-400 mt-1">累计运行秒数</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 风扇控制滑杆 -->
+            <div class="lg:col-span-2 bg-dark/60 backdrop-blur-sm rounded-xl p-6 border border-primary/30 border-glow slide-in"
+                style="animation-delay: 0.5s">
+                <h2 class="text-xl font-bold text-white flex items-center gap-2 mb-6">
+                    <i class="fa fa-sliders text-neon text-shadow-neon"></i>
+                    风扇控制
+                </h2>
+
+                <div class="space-y-8">
+                    <!-- 速度控制滑杆 -->
+                    <div class="space-y-4">
+                        <div class="flex justify-between items-center">
+                            <label for="fan-control-slider" class="text-lg font-medium text-gray-300">风扇档位调节</label>
+                            <span id="slider-value"
+                                class="px-3 py-1 rounded-full bg-primary/20 text-neon border border-primary/30 text-sm font-medium">
+                                1档
+                            </span>
+                        </div>
+
+                        <!-- 自定义滑杆样式 -->
+                        <div class="px-2">
+                            <input type="range" id="fan-control-slider" min="1" max="9" value="1"
+                                class="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-neon">
+                            <!-- 滑杆刻度 -->
+                            <div class="flex justify-between mt-1 text-xs text-gray-500">
+                                <span>1档</span>
+                                <span>3档</span>
+                                <span>5档</span>
+                                <span>7档</span>
+                                <span>9档</span>
+                            </div>
+                        </div>
+
+                        <!-- 控制按钮 -->
+                        <div class="flex gap-3 mt-6">
+                            <button id="toggle-btn"
+                                class="flex-1 bg-danger hover:bg-danger/80 text-white font-medium py-2 px-4 rounded-lg transition-all duration-300 flex items-center justify-center gap-2 border border-danger/50">
+                                <i class="fa fa-play"></i>
+                                <span id="toggle-btn-text">启动</span>
+                            </button>
+                            <button id="apply-btn"
+                                class="w-24 bg-primary hover:bg-primary/80 text-white font-medium py-2 px-4 rounded-lg transition-all duration-300 flex items-center justify-center gap-2 border border-primary/50 shadow-neon">
+                                <i class="fa fa-check"></i>
+                                应用
+                            </button>
+                            <button id="reset-counter-btn"
+                                class="w-24 bg-warning hover:bg-warning/80 text-white font-medium py-2 px-4 rounded-lg transition-all duration-300 flex items-center justify-center gap-2 border border-warning/50">
+                                <i class="fa fa-refresh"></i>
+                                清零
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- 控制日志 -->
+                    <div>
+                        <h3 class="text-lg font-medium text-gray-300 mb-3">控制日志</h3>
+                        <div class="bg-darker/80 border border-gray-800 rounded-lg p-4 h-40 overflow-y-auto text-sm">
+                            <ul id="control-log" class="space-y-2">
+                                <li class="flex gap-2 text-gray-400">
+                                    <span class="text-gray-500">[12:05:32]</span>
+                                    <span>系统初始化完成</span>
+                                </li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 数据趋势图 -->
+        <div class="bg-dark/60 backdrop-blur-sm rounded-xl p-6 border border-primary/30 border-glow slide-in"
+            style="animation-delay: 0.6s">
+            <h2 class="text-xl font-bold text-white flex items-center gap-2 mb-6">
+                <i class="fa fa-line-chart text-neon text-shadow-neon"></i>
+                风扇速度趋势
+            </h2>
+            <div class="h-80">
+                <canvas id="trendChart"></canvas>
+            </div>
+        </div>
+    </main>
+
+    <!-- 页脚 -->
+    <footer class="bg-dark/80 backdrop-blur-md border-t border-primary/30 py-4 mt-8">
+        <div class="container mx-auto px-4 text-center text-gray-500 text-sm">
+            <p>物联网系统V2.0 | ©Ai4Energy</p>
+        </div>
+    </footer>
+
+    <!-- JavaScript 逻辑 -->
+    <script>
+        // MQTT配置
+        const MQTT_BROKER = "192.168.3.188";
+        const MQTT_PORT = 8083; // WebSocket端口
+        const MQTT_TOPIC_STATUS = "/neuron/ai4energy_report";
+        const MQTT_TOPIC_CONTROL = "/neuron/7GM9dM/write/res";
+
+        // MQTT客户端
+        let client;
+
+        // 初始化时间显示
+        function updateTime() {
+            const now = new Date();
+            const dateStr = now.toLocaleDateString('zh-CN');
+            const timeStr = now.toLocaleTimeString('zh-CN');
+            document.getElementById('current-time').textContent = `${dateStr} ${timeStr}`;
+        }
+        updateTime();
+        setInterval(updateTime, 1000);
+
+        // 风扇状态（从设备接收的状态）
+        let fanState = {
+            is_run: 0,
+            run_speed: 1,
+            counter: 0,  // 新增计数器
+            updateSeconds: 0
+        };
+
+        // 风扇控制（用户设置的控制参数）
+        let fanControl = {
+            is_run: 0,    // 用户控制的开关状态
+            run_speed: 1  // 用户控制的档位
+        };
+
+        // 性能优化变量
+        let updateTimeout = null;
+        let chartUpdateTimer = null;
+        let sliderUpdateTimer = null;
+        let trendUpdatePending = false;
+
+        // 更新数据显示 - 优化版本
+        function updateDataDisplay() {
+            // 使用防抖机制减少频繁更新
+            if (updateTimeout) {
+                clearTimeout(updateTimeout);
+            }
+
+            updateTimeout = setTimeout(() => {
+                const statusElement = document.getElementById('fan-status');
+                const fanSpeedElement = document.getElementById('fan-speed');
+                const fanSettingElement = document.getElementById('fan-setting');
+                const sliderValueElement = document.getElementById('slider-value');
+                const fanCounterElement = document.getElementById('fan-counter'); // 新增计数器元素
+
+                // 批量更新DOM以减少重排重绘
+                requestAnimationFrame(() => {
+                    // 更新风扇状态（显示设备实际状态）
+                    if (fanState.is_run) {
+                        statusElement.className = 'px-3 py-1 rounded-full text-xs font-medium bg-success/20 text-success border border-success/30';
+                        statusElement.textContent = '运行中';
+                    } else {
+                        statusElement.className = 'px-3 py-1 rounded-full text-xs font-medium bg-danger/20 text-danger border border-danger/30';
+                        statusElement.textContent = '已停止';
+                    }
+
+                    // 更新风扇速度显示（显示设备实际档位）
+                    fanSpeedElement.innerHTML = `${fanState.run_speed}<span class="text-2xl text-neon ml-1">档</span>`;
+                    fanSettingElement.textContent = `${fanState.run_speed}档`;
+                    sliderValueElement.textContent = `${fanState.run_speed}档`;
+
+                    // 更新计数器显示
+                    fanCounterElement.innerHTML = `${fanState.counter}<span class="text-xl text-neon ml-1"></span>`;
+
+                    // 更新风扇旋转速度
+                    const fanIcon = document.getElementById('fan-icon');
+                    if (fanState.is_run) {
+                        const rotationSpeed = 1.0 / fanState.run_speed; // 档位越高转速越快
+                        fanIcon.style.animation = `spin ${rotationSpeed}s linear infinite`;
+                    } else {
+                        fanIcon.style.animation = 'none';
+                    }
+
+                    // 更新图表（节流处理）
+                    updateChartsThrottled();
+                });
+            }, 50); // 50ms防抖延迟
+        }
+
+        // 节流处理图表更新
+        function updateChartsThrottled() {
+            if (chartUpdateTimer) {
+                return; // 如果已经在计划更新，则跳过
+            }
+
+            chartUpdateTimer = setTimeout(() => {
+                updateFanSpeedChart();
+                addTrendDataPoint();
+                chartUpdateTimer = null;
+            }, 100); // 最多每100ms更新一次图表
+        }
+
+        // 风扇速度环形图
+        let fanSpeedChart;
+        function initFanSpeedChart() {
+            const ctx = document.getElementById('fanSpeedChart').getContext('2d');
+            fanSpeedChart = new Chart(ctx, {
+                type: 'doughnut',
+                data: {
+                    datasets: [{
+                        data: [fanState.run_speed, 9 - fanState.run_speed],
+                        backgroundColor: [
+                            '#22d3ee',
+                            'rgba(14, 165, 238, 0.1)'
+                        ],
+                        borderColor: [
+                            '#22d3ee',
+                            'rgba(14, 165, 238, 0.2)'
+                        ],
+                        borderWidth: 1,
+                        cutout: '80%'
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    animation: false, // 关闭动画以提高性能
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: { enabled: false }
+                    }
+                }
+            });
+        }
+
+        function updateFanSpeedChart() {
+            if (fanSpeedChart) {
+                fanSpeedChart.data.datasets[0].data = [fanState.run_speed, 9 - fanState.run_speed];
+                fanSpeedChart.update('none'); // 使用'none'禁用动画以提高性能
+            }
+        }
+
+        // 趋势图表
+        let trendChart;
+        const trendData = {
+            labels: [],
+            fanSpeed: []
+        };
+
+        function initTrendChart() {
+            // 初始化标签（最近30个数据点）
+            for (let i = 29; i >= 0; i--) {
+                const time = new Date();
+                time.setMinutes(time.getMinutes() - i);
+                trendData.labels.push(time.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }));
+            }
+
+            // 初始化数据
+            for (let i = 0; i < 30; i++) {
+                trendData.fanSpeed.push(1);
+            }
+
+            const ctx = document.getElementById('trendChart').getContext('2d');
+            trendChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: trendData.labels,
+                    datasets: [
+                        {
+                            label: '风扇档位',
+                            data: trendData.fanSpeed,
+                            borderColor: '#22d3ee',
+                            backgroundColor: 'rgba(34, 211, 238, 0.1)',
+                            tension: 0.4,
+                            fill: false,
+                            borderWidth: 2
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    animation: false, // 关闭动画以提高性能
+                    interaction: {
+                        mode: 'index',
+                        intersect: false
+                    },
+                    scales: {
+                        x: {
+                            grid: {
+                                color: 'rgba(255, 255, 255, 0.05)'
+                            },
+                            ticks: {
+                                color: 'rgba(255, 255, 255, 0.6)'
+                            }
+                        },
+                        y: {
+                            type: 'linear',
+                            display: true,
+                            position: 'left',
+                            min: 0,
+                            max: 9,
+                            grid: {
+                                color: 'rgba(255, 255, 255, 0.05)'
+                            },
+                            ticks: {
+                                color: 'rgba(255, 255, 255, 0.6)',
+                                stepSize: 1
+                            },
+                            title: {
+                                display: true,
+                                text: '风扇档位',
+                                color: 'rgba(255, 255, 255, 0.8)'
+                            }
+                        }
+                    },
+                    plugins: {
+                        legend: {
+                            labels: {
+                                color: 'rgba(255, 255, 255, 0.8)'
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        // 添加趋势数据点 - 优化版本
+        function addTrendDataPoint() {
+            // 避免同时多次调用
+            if (trendUpdatePending) return;
+
+            trendUpdatePending = true;
+
+            requestAnimationFrame(() => {
+                const now = new Date();
+                const timeLabel = now.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+
+                // 批量更新数据
+                trendData.labels.push(timeLabel);
+                trendData.fanSpeed.push(fanState.run_speed);
+
+                // 保持固定数量的数据点
+                if (trendData.labels.length > 30) {
+                    trendData.labels.shift();
+                    trendData.fanSpeed.shift();
+                }
+
+                // 更新图表
+                if (trendChart) {
+                    trendChart.update('none'); // 使用'none'禁用动画以提高性能
+                }
+
+                trendUpdatePending = false;
+            });
+        }
+
+        // 控制日志功能 - 优化版本
+        function addControlLog(message) {
+            const now = new Date();
+            const timeStr = now.toLocaleTimeString('zh-CN');
+            const logList = document.getElementById('control-log');
+
+            // 创建新的日志项
+            const logItem = document.createElement('li');
+            logItem.className = 'flex gap-2 text-gray-400';
+            logItem.innerHTML = `
+                <span class="text-gray-500">[${timeStr}]</span>
+                <span>${message}</span>
+            `;
+
+            // 使用DocumentFragment优化DOM操作
+            const fragment = document.createDocumentFragment();
+            fragment.appendChild(logItem);
+
+            // 插入到顶部
+            logList.insertBefore(fragment, logList.firstChild);
+
+            // 限制日志数量 - 批量删除以提高性能
+            if (logList.children.length > 10) {
+                while (logList.children.length > 10) {
+                    logList.removeChild(logList.lastChild);
+                }
+            }
+        }
+
+        // 初始化滑杆事件 - 优化版本
+        function initSliderControl() {
+            const slider = document.getElementById('fan-control-slider');
+            const applyBtn = document.getElementById('apply-btn');
+            const toggleBtn = document.getElementById('toggle-btn');
+            const toggleBtnText = document.getElementById('toggle-btn-text');
+            // 获取新增的清零按钮
+            const resetCounterBtn = document.getElementById('reset-counter-btn');
+
+            // 滑杆值变化 - 使用节流
+            slider.addEventListener('input', function () {
+                // 节流处理，避免频繁更新
+                if (sliderUpdateTimer) {
+                    clearTimeout(sliderUpdateTimer);
+                }
+
+                sliderUpdateTimer = setTimeout(() => {
+                    const value = parseInt(this.value);
+                    // 更新控制参数，但不立即发送
+                    fanControl.run_speed = value;
+                    document.getElementById('slider-value').textContent = `${value}档`;
+                }, 100);
+            });
+
+            // 应用设置
+            applyBtn.addEventListener('click', function () {
+                // 发送用户设置的控制参数
+                fanControl.run_speed = parseInt(slider.value);
+                sendControlCommand('control'); // 发送控制命令
+                addControlLog(`风扇档位设置为 ${fanControl.run_speed}档`);
+
+                // 更改按钮状态
+                this.classList.add('bg-success');
+                this.innerHTML = '<i class="fa fa-check"></i> 已应用';
+                setTimeout(() => {
+                    this.classList.remove('bg-success');
+                    this.innerHTML = '<i class="fa fa-check"></i> 应用';
+                }, 1500);
+            });
+
+            // 启动/停止切换按钮
+            toggleBtn.addEventListener('click', function () {
+                // 切换控制参数，但不立即更新UI
+                fanControl.is_run = !fanControl.is_run;
+                sendControlCommand('control'); // 发送控制命令
+
+                if (fanControl.is_run) {
+                    this.className = 'flex-1 bg-success hover:bg-success/80 text-white font-medium py-2 px-4 rounded-lg transition-all duration-300 flex items-center justify-center gap-2 border border-success/50';
+                    toggleBtnText.textContent = '停止';
+                    this.innerHTML = '<i class="fa fa-stop"></i><span id="toggle-btn-text">停止</span>';
+                    addControlLog('发送启动命令');
+                } else {
+                    this.className = 'flex-1 bg-danger hover:bg-danger/80 text-white font-medium py-2 px-4 rounded-lg transition-all duration-300 flex items-center justify-center gap-2 border border-danger/50';
+                    toggleBtnText.textContent = '启动';
+                    this.innerHTML = '<i class="fa fa-play"></i><span id="toggle-btn-text">启动</span>';
+                    addControlLog('发送停止命令');
+                }
+            });
+
+            // 新增：counter清零按钮事件
+            resetCounterBtn.addEventListener('click', function () {
+                sendControlCommand('counter_reset');
+                addControlLog('发送counter清零命令');
+
+                // 更改按钮状态
+                this.classList.add('bg-success');
+                this.innerHTML = '<i class="fa fa-refresh"></i> 已清零';
+                setTimeout(() => {
+                    this.classList.remove('bg-success');
+                    this.innerHTML = '<i class="fa fa-refresh"></i> 清零';
+                }, 1500);
+            });
+        }
+        // MQTT连接
+        function connectMQTT() {
+            const clientId = "web_client_" + Math.random().toString(16).substr(2, 8);
+            client = new Paho.MQTT.Client(MQTT_BROKER, MQTT_PORT, clientId);
+
+            // 设置回调函数
+            client.onConnectionLost = onConnectionLost;
+            client.onMessageArrived = onMessageArrived;
+
+            // 连接选项
+            const options = {
+                onSuccess: onConnect,
+                onFailure: onFailure,
+                keepAliveInterval: 10,
+                cleanSession: true,
+                timeout: 30
+            };
+
+            // 连接到服务器
+            client.connect(options);
+        }
+
+        // 连接成功的回调
+        function onConnect() {
+            console.log("MQTT连接成功");
+            document.getElementById('connection-status').className = 'text-success';
+            document.getElementById('connection-status').innerHTML = '<i class="fa fa-circle text-xs animate-pulse"></i> 在线';
+            addControlLog('MQTT连接成功');
+
+            // 订阅主题
+            client.subscribe(MQTT_TOPIC_STATUS);
+            console.log("已订阅主题: " + MQTT_TOPIC_STATUS);
+        }
+
+        // 连接失败的回调
+        function onFailure(error) {
+            console.log("MQTT连接失败: " + error.errorMessage);
+            document.getElementById('connection-status').className = 'text-danger';
+            document.getElementById('connection-status').innerHTML = '<i class="fa fa-circle text-xs"></i> 离线';
+            addControlLog('MQTT连接失败: ' + error.errorMessage);
+
+            // 5秒后重试
+            setTimeout(connectMQTT, 5000);
+        }
+
+        // 连接丢失的回调
+        function onConnectionLost(responseObject) {
+            if (responseObject.errorCode !== 0) {
+                console.log("MQTT连接丢失: " + responseObject.errorMessage);
+                document.getElementById('connection-status').className = 'text-danger';
+                document.getElementById('connection-status').innerHTML = '<i class="fa fa-circle text-xs"></i> 离线';
+                addControlLog('MQTT连接丢失: ' + responseObject.errorMessage);
+
+                // 尝试重连
+                setTimeout(connectMQTT, 5000);
+            }
+        }
+
+        // 消息到达的回调
+        function onMessageArrived(message) {
+            console.log("收到消息: " + message.payloadString);
+
+            try {
+                const data = JSON.parse(message.payloadString);
+
+                // 处理新格式的数据 - 检查是否包含tags数组
+                if (data.tags && Array.isArray(data.tags)) {
+                    // 新格式：处理tags数组
+                    const tagsMap = {};
+                    data.tags.forEach(tag => {
+                        tagsMap[tag.tag] = tag.value;
+                    });
+
+                    fanState.is_run = tagsMap.is_run || 0;
+                    fanState.run_speed = tagsMap.run_speed || 1;
+                    fanState.counter = tagsMap.counter || 0; // 新增计数器值
+                }
+                // 处理旧格式数据
+                else if (data.values && data.values.hasOwnProperty('is_run') && data.values.hasOwnProperty('speed')) {
+                    // 旧格式：{"node": "ai4energy", "group": "fan", "timestamp": 1766747978840, "values": {"speed": 1.0, "is_run": 0, "counter": 1158.0}}
+                    fanState.is_run = data.values.is_run;
+                    fanState.run_speed = Math.round(data.values.speed); // 转换为整数档位
+                    fanState.counter = data.values.counter || 0; // 新增计数器值
+                } else if (data.hasOwnProperty('is_run') && data.hasOwnProperty('run_speed')) {
+                    // 兼容旧格式：{"is_run": 0, "run_speed": 1}
+                    fanState.is_run = data.is_run;
+                    fanState.run_speed = data.run_speed;
+                    fanState.counter = 0; // 如果没有计数器值，则设为0
+                }
+
+                // 更新UI（显示设备实际状态）
+                updateDataDisplay();
+
+                addControlLog(`接收到状态更新: ${fanState.is_run ? '运行' : '停止'}, 档位${fanState.run_speed}, 计数器${fanState.counter}`);
+            } catch (e) {
+                console.error("解析MQTT消息失败: ", e);
+            }
+        }
+        // 发送控制命令
+        function sendControlCommand(commandType = 'control') {
+            if (!client || !client.isConnected()) {
+                addControlLog('MQTT未连接，无法发送命令');
+                return;
+            }
+
+            let command;
+
+            if (commandType === 'counter_reset') {
+                // 发送counter清零命令
+                command = {
+                    uuid: "cd32be1b-c8b1-3257-94af-77f847b1ed3e",
+                    node: "ai4energy",
+                    group: "fan",
+                    tags: [
+                        {
+                            tag: "counter",
+                            value: 0
+                        }
+                    ]
+                };
+            } else {
+                // 发送控制命令
+                command = {
+                    uuid: "cd32be1b-c8b1-3257-94af-77f847b1ed3e",
+                    node: "ai4energy",
+                    group: "fan",
+                    tags: [
+                        {
+                            tag: "is_run",
+                            value: fanControl.is_run ? 1 : 0  // 确保值为0或1
+                        },
+                        {
+                            tag: "speed",
+                            value: fanControl.run_speed
+                        }
+                    ]
+                };
+            }
+
+            const message = new Paho.MQTT.Message(JSON.stringify(command));
+            message.destinationName = MQTT_TOPIC_CONTROL;
+
+            client.send(message);
+            console.log("发送控制命令: " + JSON.stringify(command));
+        }
+
+        // 初始化所有功能
+        window.addEventListener('DOMContentLoaded', function () {
+            initFanSpeedChart();
+            initTrendChart();
+            initSliderControl();
+            updateDataDisplay();
+
+            // 连接MQTT
+            connectMQTT();
+        });
+    </script>
+</body>
+
+</html>
